@@ -1,0 +1,73 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: parallax
+      POSTGRES_PASSWORD: parallax
+      POSTGRES_DB: parallax
+    ports:
+      - "5435:5432"
+    volumes:
+      - parallax_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parallax"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://parallax:parallax@db:5432/parallax
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8003:8003"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+  worker:
+    build: ./backend
+    command: celery -A app.workers.celery_app worker --loglevel=info --pool=solo
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://parallax:parallax@db:5432/parallax
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+  beat:
+    build: ./backend
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://parallax:parallax@db:5432/parallax
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - ./backend:/app
+
+volumes:
+  parallax_pgdata:

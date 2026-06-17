@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────── Tokens (§9.2) ─────────────────────────────── */
+:root {
+  --paper: #fbfaf7;
+  --paper-2: #f4f2ec;
+  --ink: #1a1916;
+  --ink-2: #565248;
+  --ink-3: #8a857a;
+  --line: #e6e2d8;
+  --line-2: #d8d3c6;
+  --seal: #b4472f;
+  --field: #ffffff;
+
+  /* font-family CSS vars are injected by next/font in layout.tsx:
+     --font-serif, --font-sans, --font-mono */
+}
+
+/* ─────────────────────────────── Base ─────────────────────────────── */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans), Inter, system-ui, sans-serif;
+    /* generous reading size + line-height (§9.1 legibility first) */
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    font-feature-settings: "kern" 1, "liga" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-serif), Newsreader, Georgia, serif;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--ink);
+  }
+
+  /* Visible keyboard focus (§9.3 quality floor) */
+  :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Form controls inherit warm typography */
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  ::selection {
+    background: var(--line-2);
+    color: var(--ink);
+  }
+}
+
+/* ─────────────────────────────── Helpers ─────────────────────────────── */
+@layer components {
+  /* Hairline rules, not boxes (§9.1) */
+  .rule {
+    border: 0;
+    border-top: 1px solid var(--line);
+    margin: 0;
+  }
+  .rule-strong {
+    border: 0;
+    border-top: 1px solid var(--line-2);
+    margin: 0;
+  }
+
+  /* Eyebrow — small caps provenance label (§9.3) */
+  .eyebrow {
+    font-family: var(--font-sans), Inter, sans-serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+  }
+
+  /* Machine identifiers only — UPRN, refs (§9.1) */
+  .ref {
+    font-family: var(--font-mono), "IBM Plex Mono", monospace;
+    font-size: 0.82em;
+    color: var(--ink-2);
+    letter-spacing: -0.01em;
+  }
+
+  /* Calm primary control */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 7px;
+    padding: 0.6rem 1.05rem;
+    font-size: 0.94rem;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .btn-primary {
+    background-color: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--ink);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: #2c2a25;
+  }
+  .btn-secondary {
+    background-color: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line-2);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    border-color: var(--ink-3);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .field {
+    background-color: var(--field);
+    border: 1px solid var(--line-2);
+    border-radius: 7px;
+    padding: 0.55rem 0.7rem;
+    width: 100%;
+    color: var(--ink);
+  }
+  .field::placeholder {
+    color: var(--ink-3);
+  }
+  .field:focus {
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+    border-color: var(--ink);
+  }
+
+  /* Inline source reference inside briefing prose (§9.3) */
+  .source-ref {
+    font-family: var(--font-mono), "IBM Plex Mono", monospace;
+    font-size: 0.68em;
+    vertical-align: super;
+    line-height: 0;
+    color: var(--seal);
+    margin-left: 1px;
+    cursor: help;
+    text-decoration: none;
+  }
+}
+
+/* ─────────────────────────────── Reduced motion ─────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
