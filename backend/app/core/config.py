@@ -4,6 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,6 +40,19 @@ class Settings(BaseSettings):
     # Auth
     jwt_secret: str = "dev-secret-change-me"
     access_token_ttl_min: int = 10080
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _ensure_async_driver(cls, v: str) -> str:
+        """Managed providers (Railway, Heroku, etc.) emit ``postgres(ql)://``; the async engine
+        needs the asyncpg driver. Normalise so the same value works everywhere."""
+        if not isinstance(v, str):
+            return v
+        if v.startswith("postgres://"):
+            v = "postgresql://" + v[len("postgres://") :]
+        if v.startswith("postgresql://"):
+            v = "postgresql+asyncpg://" + v[len("postgresql://") :]
+        return v
 
     @property
     def sync_database_url(self) -> str:
