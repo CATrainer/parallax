@@ -71,75 +71,83 @@ async def _check_companies_house(db, site: Site, provenance: list[dict]) -> int:
 
 
 async def _check_title_pull(db, site: Site, validation: Validation, provenance: list[dict]) -> int:
-    """Targeted paid: a single HMLR title pull (~3 credits) → confirmed ownership + occupancy."""
-    cost = 0
+    """Confirm the current proprietor. The free briefing's ownership is a *probabilistic* link;
+    this resolves the proprietor from the ownership register (always available), then upgrades to a
+    title-confirmed reading via an HMLR title pull when available (SEED fixture, or LIVE + HMLR key).
+    Returns the credit cost incurred."""
+    from sqlalchemy import select
+
+    from app.models.entities import Owner, OwnershipLink
+
+    # 1) Proprietor from the resolved ownership spine — always available, no external cost.
+    confirmed: dict | None = None
     try:
-        from sqlalchemy import select
-
-        from app.adapters.hmlr import HmlrTitleAdapter  # lazy — avoid import cycle
-        from app.models.entities import Owner, OwnershipLink
-
-        adapter = HmlrTitleAdapter()
-        title = await adapter.title_pull(site.uprn)
-        cost = 3
-        t = title if isinstance(title, dict) else (getattr(title, "__dict__", {}) or {})
-
-        # The free briefing's ownership is a *probabilistic* link; the title pull confirms it.
-        # Resolve the current proprietor from the spine to confirm a real name + address (the
-        # value the credit buys), enriched with the title register's number/tenure/date.
         stmt = (
             select(Owner, OwnershipLink)
             .join(OwnershipLink, OwnershipLink.owner_id == Owner.id)
-            .where(
-                OwnershipLink.site_uprn == site.uprn,
-                OwnershipLink.role == "proprietor",
-            )
+            .where(OwnershipLink.site_uprn == site.uprn, OwnershipLink.role == "proprietor")
             .order_by(OwnershipLink.link_confidence.desc())
             .limit(1)
         )
         row = (await db.execute(stmt)).first()
-        proprietors = t.get("proprietors") or []
         if row is not None:
             owner, _link = row
             confirmed = {
                 "proprietor": owner.display_name,
                 "proprietor_type": "company" if owner.company_number else "private_individual",
-                "title_number": t.get("title_number"),
-                "tenure": t.get("tenure") or site.tenure,
-                "registered_date": t.get("registered_date"),
+                "tenure": site.tenure,
                 "correspondence_address": owner.last_known_address or site.address,
-                "basis": "title-confirmed",
+                "basis": "registry-resolved",
             }
             if owner.company_number:
                 confirmed["company_number"] = owner.company_number
-        elif proprietors:
-            p = proprietors[0]
+    except Exception:  # noqa: BLE001
+        log.warning("validation_owner_resolve_failed", uprn=site.uprn)
+
+    # 2) Best-effort HMLR title pull to upgrade to a title-confirmed reading.
+    cost = 0
+    title: dict | None = None
+    try:
+        from app.adapters.hmlr import HmlrTitleAdapter  # lazy — avoid import cycle
+
+        result = await HmlrTitleAdapter().title_pull(site.uprn)
+        title = result if isinstance(result, dict) else None
+        cost = 3
+    except Exception:  # noqa: BLE001 — no HMLR key / unavailable; registry-resolved stands
+        log.info("hmlr_title_unavailable", uprn=site.uprn)
+
+    if title:
+        if confirmed is None:
+            props = title.get("proprietors") or [{}]
             confirmed = {
-                "proprietor": p.get("name"),
-                "proprietor_type": p.get("proprietor_type"),
-                "title_number": t.get("title_number"),
-                "tenure": t.get("tenure"),
-                "correspondence_address": p.get("address"),
+                "proprietor": props[0].get("name"),
+                "proprietor_type": props[0].get("proprietor_type"),
+                "correspondence_address": props[0].get("address"),
+            }
+        confirmed.update(
+            {
+                "title_number": title.get("title_number"),
+                "tenure": title.get("tenure") or confirmed.get("tenure") or site.tenure,
+                "registered_date": title.get("registered_date"),
                 "basis": "title-confirmed",
             }
-        else:
-            confirmed = None
+        )
+        note = "Title register pulled; proprietor title-confirmed."
+    elif confirmed is not None:
+        note = "Proprietor confirmed from the ownership register (HMLR title pull not configured)."
+    else:
+        note = "No proprietor on record for this site."
 
-        if confirmed is not None:
-            validation.confirmed_ownership = confirmed
-        provenance.append(
-            _provenance(
-                "hmlr_title_pull",
-                "hmlr_title",
-                cost,
-                "Title register pulled; current proprietor confirmed against the register.",
-            )
+    if confirmed is not None:
+        validation.confirmed_ownership = confirmed
+    provenance.append(
+        _provenance(
+            "hmlr_title_pull" if cost else "ownership_confirm",
+            "hmlr_title" if cost else "ownership_register",
+            cost,
+            note,
         )
-    except Exception:  # noqa: BLE001
-        log.warning("validation_title_pull_failed", uprn=site.uprn)
-        provenance.append(
-            _provenance("hmlr_title_pull", "hmlr_title", cost, "Title pull unavailable.")
-        )
+    )
     return cost
 
 

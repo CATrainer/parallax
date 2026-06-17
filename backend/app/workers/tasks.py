@@ -55,26 +55,93 @@ def ingest_source(name: str) -> dict:
     return _run(_ingest_source(name))
 
 
+# ── Ingestion scoping (§5.6 + §2 "works the patch") ─────────────────────────────────────────────
+# Scheduled live ingestion is scoped to the user's patch(es) so it NEVER pulls national data:
+_POSTCODE_SOURCES = {"epc"}                                   # fetch per full postcode in the patch
+_GEO_SOURCES = {"planit"}                                     # fetch per lat/lng point (small radius)
+_NATIONAL_FEED_SOURCES = {"gazette_deceased", "gazette_insolvency"}  # fetch national, filter to patch
+# Anything else (companies_house, hmlr_price_paid, voa) is resolved on demand or too heavy to bulk
+# ingest unscoped, so scheduled runs skip it until explicitly scoped.
+
+
+def _outward(value: str | None) -> str:
+    """Outward code (e.g. 'BS3') parsed from a postcode or free-text address."""
+    if not value:
+        return ""
+    from app.engine.resolution import normalise_address
+
+    pc = normalise_address(value).get("postcode") or ""
+    return pc.split(" ")[0].upper() if pc else ""
+
+
+async def _patch_targets(db) -> dict:
+    """Derive ingestion scope from all defined patches: outward codes + the full postcodes and
+    geo points of sites within them."""
+    from sqlalchemy import select
+
+    from app.models.entities import Patch, Site
+
+    patches = (await db.execute(select(Patch))).scalars().all()
+    outward = {pc.strip().upper() for p in patches for pc in (p.postcodes or []) if pc and pc.strip()}
+    full_postcodes: set[str] = set()
+    points: list[tuple[float, float]] = []
+    if outward:
+        sites = (await db.execute(select(Site))).scalars().all()
+        seen: set = set()
+        for s in sites:
+            oc = (s.postcode or "").split(" ")[0].upper() if s.postcode else ""
+            if oc and oc in outward:
+                if s.postcode:
+                    full_postcodes.add(s.postcode)
+                if s.lat is not None and s.lng is not None:
+                    key = (round(s.lat, 2), round(s.lng, 2))
+                    if key not in seen:
+                        seen.add(key)
+                        points.append((s.lat, s.lng))
+    return {"outward": outward, "full_postcodes": sorted(full_postcodes), "points": points}
+
+
 async def _ingest_source(name: str) -> dict:
     from app.adapters.registry import get_adapter
     from app.models.entities import RawRecord
 
     adapter = get_adapter(name)
     stored = 0
+    raw_ids: list[str] = []
     async with _session() as db:
+        targets = await _patch_targets(db)
+        if not targets["outward"]:
+            log.info("ingest_skip_no_patch", source=name)
+            return {"source": name, "stored": 0}
+
+        fetched: list[dict] = []
         try:
-            raws = await adapter.fetch()
+            if name in _POSTCODE_SOURCES:
+                for pc in targets["full_postcodes"]:
+                    fetched += await adapter.fetch(postcode=pc) or []
+            elif name in _GEO_SOURCES:
+                for lat, lng in targets["points"]:
+                    fetched += await adapter.fetch(lat=lat, lng=lng, radius_km=1) or []
+            elif name in _NATIONAL_FEED_SOURCES:
+                fetched = await adapter.fetch() or []  # filtered to the patch below
+            else:
+                log.info("ingest_unscoped_skip", source=name)
+                return {"source": name, "stored": 0}
         except Exception:  # noqa: BLE001 — adapter failure is logged, never crashes the beat
             log.warning("ingest_fetch_failed", source=name)
-            raws = []
+            fetched = []
 
-        raw_ids: list[str] = []
-        for raw in raws or []:
+        for raw in fetched:
             try:
                 item = adapter.normalise(raw)
             except Exception:  # noqa: BLE001 — skip a malformed record
                 log.warning("ingest_normalise_failed", source=name)
                 continue
+            # National feeds keep only records whose address falls in a patch outward code.
+            if name in _NATIONAL_FEED_SOURCES:
+                addr = (item.payload or {}).get("last_address") or (item.payload or {}).get("address")
+                if _outward(addr) not in targets["outward"]:
+                    continue
             record = RawRecord(
                 source=item.source,
                 source_ref=item.source_ref,
@@ -94,7 +161,7 @@ async def _ingest_source(name: str) -> dict:
         except Exception:  # noqa: BLE001 — queue hiccup; the record is persisted for retry
             log.warning("ingest_enqueue_failed", source=name)
 
-    log.info("ingest_complete", source=name, stored=stored)
+    log.info("ingest_complete", source=name, stored=stored, scope=len(targets["outward"]))
     return {"source": name, "stored": stored}
 
 
@@ -140,11 +207,21 @@ def score_and_synthesize(uprn: str) -> dict:
     return _run(_score_and_synthesize(uprn))
 
 
+# Auto-synthesize on ingest only for sites worth a briefing; weaker sites keep their stored
+# signals and get a briefing lazily when viewed (get_or_build_briefing). Bounds live-ingest cost.
+_AUTO_SYNTH_FLOOR = 25
+
+
 async def _score_and_synthesize(uprn: str) -> dict:
+    from app.engine.scoring import rescore_site
     from app.engine.synthesis import synthesize_briefing
 
     async with _session() as db:
         try:
+            score = await rescore_site(db, uprn)
+            if score.conviction < _AUTO_SYNTH_FLOOR and len(score.matched_opportunity_types) < 2:
+                log.info("synth_skip_low", uprn=uprn, conviction=score.conviction)
+                return {"uprn": uprn, "skipped": True, "conviction": score.conviction}
             briefing = await synthesize_briefing(db, uprn, premium=True)
             await db.commit()
             log.info("synth_complete", uprn=uprn, conviction=briefing.conviction, band=briefing.band)
