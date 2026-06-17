@@ -24,8 +24,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Extensions first — PostGIS for the geometry column, pg_trgm for fuzzy address search.
-    op.execute("CREATE EXTENSION IF NOT EXISTS postgis")
+    # pg_trgm for fuzzy address search (ships with standard Postgres).
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
 
     bind = op.get_bind()

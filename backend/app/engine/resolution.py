@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timezone
 
 from rapidfuzz.fuzz import token_sort_ratio
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.core.logging import get_logger
 from app.models.entities import GeocodeCache, Owner, OwnershipLink, Site
@@ -192,11 +192,6 @@ async def resolve_site(
         site_key = site.uprn
     lat = cache.lat
     lng = cache.lng
-    geom = (
-        func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326)
-        if (lat is not None and lng is not None)
-        else None
-    )
 
     if site is None:
         site = Site(
@@ -207,7 +202,6 @@ async def resolve_site(
             saon=eff_saon,
             lat=lat,
             lng=lng,
-            geom=geom,
             property_type=property_type,
             local_authority=local_authority,
             resolution_confidence=cache.match_confidence,
@@ -222,7 +216,6 @@ async def resolve_site(
         if lat is not None and lng is not None:
             site.lat = lat
             site.lng = lng
-            site.geom = geom
         site.property_type = property_type or site.property_type
         site.local_authority = local_authority or site.local_authority
         if cache.match_confidence:

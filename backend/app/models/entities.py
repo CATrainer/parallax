@@ -8,7 +8,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from geoalchemy2 import Geometry
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -48,7 +47,6 @@ class Site(Base, TimestampMixin):
     saon: Mapped[str | None] = mapped_column(String(120))
     lat: Mapped[float | None] = mapped_column(Float)
     lng: Mapped[float | None] = mapped_column(Float)
-    geom: Mapped[object | None] = mapped_column(Geometry("POINT", srid=4326), nullable=True)
     property_type: Mapped[str | None] = mapped_column(String(40))
     tenure: Mapped[str | None] = mapped_column(String(40))
     local_authority: Mapped[str | None] = mapped_column(String(120), index=True)

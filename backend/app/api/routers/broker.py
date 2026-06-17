@@ -61,11 +61,9 @@ class EnrichBody(BaseModel):
 
 
 def _split_addresses(raw: str) -> list[str]:
+    # One address per line (or semicolon-separated). NEVER split on commas — UK addresses
+    # contain them ("14 Mill Lane, Bristol, BS3 4QN"), so comma-splitting shatters one address.
     parts = re.split(r"[\n;]+", raw or "")
-    # Also allow comma-separated single-line lists, but keep commas inside an address intact
-    # by only splitting on commas when there are no newlines/semicolons at all.
-    if len(parts) == 1 and "," in raw:
-        parts = raw.split(",")
     return [p.strip() for p in parts if p and p.strip()]
 
 

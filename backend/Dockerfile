@@ -15,6 +15,9 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
+# Normalise line endings + make the role-switch entrypoint executable.
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
+
 EXPOSE 8003
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["./entrypoint.sh"]

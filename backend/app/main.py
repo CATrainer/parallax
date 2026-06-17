@@ -48,8 +48,7 @@ async def lifespan(app: FastAPI):
         from sqlalchemy import text
 
         async with engine.begin() as conn:
-            # Extensions the schema relies on (pg_trgm for fuzzy search; postgis for geom).
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+            # pg_trgm powers fuzzy address search; it ships with standard Postgres.
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
             await conn.run_sync(Base.metadata.create_all)
         log.info("schema_ensured")
