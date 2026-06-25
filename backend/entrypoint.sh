@@ -7,7 +7,11 @@ set -e
 
 case "${ROLE:-api}" in
   worker)
-    exec celery -A app.workers.celery_app worker --beat --loglevel=info
+    # Concurrency is pinned LOW on purpose: Celery's prefork pool otherwise spawns one process
+    # per host CPU core (Railway exposes ~40+), forking the whole app into many GB of idle RAM.
+    # Override with WORKER_CONCURRENCY if you ever need more parallelism.
+    exec celery -A app.workers.celery_app worker --beat --loglevel=info \
+      --concurrency="${WORKER_CONCURRENCY:-2}" --max-tasks-per-child=200
     ;;
   beat)
     exec celery -A app.workers.celery_app beat --loglevel=info
